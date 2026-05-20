@@ -5,7 +5,6 @@ import sqlite3
 from datetime import datetime
 import json
 import os
-import mock_data
 
 # =========================================
 # CONFIGURAÇÃO DE PÁGINA
@@ -102,7 +101,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================
-# BANCO DE DADOS (Conexão Segura com context manager e Migração)
+# BANCO DE DADOS (Conexão Segura e Migração)
 # =========================================
 DB_NAME = "trader_ld.db"
 
@@ -164,15 +163,12 @@ def salvar_configuracao(api_football, api_odds, telegram_token, telegram_chat_id
         pass
 
 # =========================================
-# SESSION STATE (Inicialização de chaves)
+# SESSION STATE (Inicialização e Estados)
 # =========================================
 config_carregada = carregar_configuracao()
 
-if "banca" not in st.session_state:
-    st.session_state.banca = 1000.0
-
-if "api_mode" not in st.session_state:
-    st.session_state.api_mode = "Simulador (Demo)"
+if "banca_inicial" not in st.session_state:
+    st.session_state.banca_inicial = 1000.0
 
 if "api_football" not in st.session_state:
     st.session_state.api_football = config_carregada.get("api_football", "SUA_API_FOOTBALL")
@@ -186,93 +182,106 @@ if "telegram_token" not in st.session_state:
 if "telegram_chat_id" not in st.session_state:
     st.session_state.telegram_chat_id = config_carregada.get("telegram_chat_id", "")
 
+# Controle de formulários ativos nos cards de jogo
+if "active_green_id" not in st.session_state:
+    st.session_state.active_green_id = None
+
+if "active_red_id" not in st.session_state:
+    st.session_state.active_red_id = None
+
 # =========================================
 # SIDEBAR - CONFIGURAÇÃO E GESTÃO
 # =========================================
 st.sidebar.markdown("### ⚙️ Painel de Controle")
 
-# 1. Configurações de API, Conectividade e Telegram
-api_expander = st.sidebar.expander("🔌 APIs & Fonte de Dados", expanded=True)
+# 1. Configurações de Conectividade e Telegram
+api_expander = st.sidebar.expander("🔌 APIs & Canal do Telegram", expanded=True)
 with api_expander:
-    api_mode = st.radio(
-        "Fonte de Dados",
-        ["Simulador (Demo)", "API Real"],
-        index=0 if st.session_state.api_mode == "Simulador (Demo)" else 1,
-        help="Simulador gera dados reais flutuantes para demonstração sem chaves pagas."
+    api_football = st.text_input(
+        "Football-Data Token",
+        value=st.session_state.api_football if st.session_state.api_football != "SUA_API_FOOTBALL" else "",
+        type="password",
+        placeholder="Cole seu token do site football-data.org",
+        help="Seu token X-Auth-Token"
     )
-    st.session_state.api_mode = api_mode
     
-    if api_mode == "API Real":
-        api_football = st.text_input(
-            "Football-Data Token",
-            value=st.session_state.api_football,
-            type="password",
-            help="Seu token X-Auth-Token do football-data.org"
-        )
-        
-        api_odds = st.text_input(
-            "The Odds API Key",
-            value=st.session_state.api_odds,
-            type="password",
-            help="Sua chave apiKey do the-odds-api.com"
-        )
-    else:
-        api_football = st.session_state.api_football
-        api_odds = st.session_state.api_odds
-        
+    api_odds = st.text_input(
+        "The Odds API Key",
+        value=st.session_state.api_odds if st.session_state.api_odds != "SUA_API_ODDS" else "",
+        type="password",
+        placeholder="Cole sua key do site the-odds-api.com",
+        help="Sua chave apiKey"
+    )
+    
     st.markdown("---")
-    st.markdown("💬 **Integração Telegram (Opcional)**")
+    st.markdown("💬 **Integração Telegram**")
     telegram_token = st.text_input(
         "Telegram Bot Token",
         value=st.session_state.telegram_token,
         type="password",
-        help="Token do seu Bot do Telegram (obtido via @BotFather)."
+        placeholder="Token gerado pelo @BotFather",
+        help="Token de acesso do seu bot"
     )
     telegram_chat_id = st.text_input(
         "Telegram Chat ID",
         value=st.session_state.telegram_chat_id,
-        help="ID do chat, grupo ou canal de trading que receberá os alertas."
+        placeholder="ID do chat/canal receptor",
+        help="O ID numérico do grupo ou canal privado"
     )
     
-    if st.button("💾 Salvar Configurações", use_container_width=True, help="Salva suas chaves de API e Telegram localmente."):
-        st.session_state.api_football = api_football
-        st.session_state.api_odds = api_odds
+    if st.button("💾 Salvar Configurações", use_container_width=True):
+        st.session_state.api_football = api_football if api_football else "SUA_API_FOOTBALL"
+        st.session_state.api_odds = api_odds if api_odds else "SUA_API_ODDS"
         st.session_state.telegram_token = telegram_token
         st.session_state.telegram_chat_id = telegram_chat_id
-        salvar_configuracao(api_football, api_odds, telegram_token, telegram_chat_id)
-        st.success("Configurações salvas localmente com sucesso!")
+        salvar_configuracao(st.session_state.api_football, st.session_state.api_odds, telegram_token, telegram_chat_id)
+        st.success("Configurações salvas localmente!")
         st.rerun()
-        
-    # Sincronização em tempo real do estado
-    st.session_state.api_football = api_football
-    st.session_state.api_odds = api_odds
-    st.session_state.telegram_token = telegram_token
-    st.session_state.telegram_chat_id = telegram_chat_id
 
-# 2. Gestão de Banca
-banca_expander = st.sidebar.expander("💰 Gestão de Banca", expanded=True)
+# 2. Gestão de Banca Avançada
+banca_expander = st.sidebar.expander("💰 Gestão de Banca Real", expanded=True)
 with banca_expander:
-    banca = st.number_input(
-        "Banca Atual (R$)",
+    banca_inicial = st.number_input(
+        "Banca de Partida (R$)",
         min_value=10.0,
         max_value=1000000.0,
-        value=st.session_state.banca,
-        step=50.0
+        value=st.session_state.banca_inicial,
+        step=50.0,
+        help="O capital total original que você colocou nas exchanges."
     )
-    st.session_state.banca = banca
+    st.session_state.banca_inicial = banca_inicial
+
+    tipo_juros = st.radio(
+        "Cálculo de Juros",
+        ["Flat Staking", "Juros Compostos"],
+        help="Flat Staking calcula a stake base sobre a Banca Inicial. Juros Compostos recalcula dinamicamente sobre a Banca Atual Corrente."
+    )
+    
+    tipo_gestao = st.radio(
+        "Método de Gestão",
+        ["Stake Fixa", "Risco Fixo (Responsabilidade Limitada)"],
+        help="Stake Fixa: Stake recomendada é fixa em % da banca. Risco Fixo: A responsabilidade (risco máximo do Lay) é rigidamente limitada a % da banca, adaptando a stake em cada odd."
+    )
 
     stake_percentual = st.slider(
-        "Stake Recomendada %",
+        "Porcentagem de Gestão %",
         min_value=1.0,
         max_value=10.0,
         value=2.0,
         step=0.5,
-        help="Porcentagem recomendada para Lay ao Empate (geralmente de 2% a 5%)."
+        help="O risco ou stake base como percentual da banca selecionada."
     )
-    stake_base = banca * (stake_percentual / 100)
-    st.caption(f"Stake Base: **R$ {stake_base:.2f}**")
+    
+    comissao = st.number_input(
+        "Comissão da Exchange (%)",
+        min_value=0.0,
+        max_value=10.0,
+        value=5.0,
+        step=0.5,
+        help="Taxa cobrada pela Betfair/Fulltbet sobre seus lucros líquidos (descontada na gravação de Greens)."
+    )
 
-# 3. Parametrização do Modelo de EV+
+# 3. Parametrização do Modelo
 model_expander = st.sidebar.expander("🧮 Parâmetros do Modelo", expanded=False)
 with model_expander:
     media_gols = st.slider(
@@ -283,23 +292,21 @@ with model_expander:
         step=0.1,
         help="Média histórica de gols da liga. Quanto mais gols, menor a probabilidade de empate."
     )
-    st.caption("Fórmula base: Lay Empate EV+ com amortecimento dinâmico.")
 
 # 4. Ações e Reset de Segurança
-danger_expander = st.sidebar.expander("⚠️ Configurações de Segurança", expanded=False)
+danger_expander = st.sidebar.expander("⚠️ Segurança & Reset", expanded=False)
 with danger_expander:
-    st.warning("Ação irreversível!")
-    confirm_reset = st.checkbox("Desejo zerar todo o histórico")
+    confirm_reset = st.checkbox("Desejo limpar todo o histórico")
     if st.button("Resetar Histórico", type="secondary"):
         if confirm_reset:
             with sqlite3.connect(DB_NAME) as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM operacoes")
                 conn.commit()
-            st.success("Histórico apagado com sucesso!")
+            st.success("Histórico zerado com sucesso!")
             st.rerun()
         else:
-            st.error("Marque a caixa de confirmação primeiro!")
+            st.error("Marque a caixa de confirmação!")
 
 # =========================================
 # LÓGICA DO MODELO MATEMÁTICO & TELEGRAM
@@ -308,7 +315,6 @@ def prob_mercado(odd):
     return round((1 / odd) * 100, 2)
 
 def modelo_empate(media_gols_ajustada):
-    # Modelo estatístico linear de gols vs empates ajustado dinamicamente
     prob = 35.0
     prob -= (media_gols_ajustada - 2) * 10.0
     prob = max(5.0, min(prob, 40.0))
@@ -323,7 +329,6 @@ def calcular_ev(stake, odd, p_modelo):
     return round(ev, 2)
 
 def stake_ajustada(stake, odd):
-    # Gerenciamento de risco: Reduzir stake em odds excessivamente altas
     if odd >= 7.0:
         return stake * 0.4
     elif odd >= 6.0:
@@ -346,13 +351,6 @@ def enviar_alerta_telegram(token, chat_id, mensagem):
         return False, str(e)
 
 # =========================================
-# TÍTULO E SUBTÍTULO
-# =========================================
-st.markdown('<h1 class="title-gradient">📈 Trader LD PRO</h1>', unsafe_allow_html=True)
-st.caption("Lay ao Empate (LD) EV+ • Inteligência Quantitativa e Gestão Avançada")
-st.write("")
-
-# =========================================
 # CARREGAMENTO E ANÁLISE DE HISTÓRICO
 # =========================================
 with sqlite3.connect(DB_NAME) as conn:
@@ -362,14 +360,22 @@ greens = len(historico[historico["resultado"] == "GREEN"])
 reds = len(historico[historico["resultado"] == "RED"])
 operacoes_totais = greens + reds
 
+# Lucro Acumulado
+lucro_total = historico["lucro"].sum() if len(historico) > 0 else 0.0
+
+# Banca Atualizada
+banca_atual = banca_inicial + lucro_total
+
+# Cálculo da Banca para Dimensionamento de Stakes
+banca_calculo = banca_atual if tipo_juros == "Juros Compostos" else banca_inicial
+
+# Winrate e ROI
 if operacoes_totais > 0:
     winrate = (greens / operacoes_totais) * 100
-    lucro_total = historico["lucro"].sum()
     stake_total_acumulada = historico["stake"].sum()
     roi = (lucro_total / stake_total_acumulada) * 100 if stake_total_acumulada > 0 else 0.0
 else:
     winrate = 0.0
-    lucro_total = 0.0
     roi = 0.0
 
 # =========================================
@@ -378,16 +384,16 @@ else:
 kpi_cols = st.columns(5)
 
 kpi_cols[0].metric(
-    "💰 Banca Atual",
-    f"R$ {banca:.2f}",
-    help="Sua banca de trading configurada na barra lateral."
+    "💰 Banca Inicial",
+    f"R$ {banca_inicial:.2f}",
+    help="O seu capital inicial de partida configurado."
 )
 kpi_cols[1].metric(
-    "📈 Lucro Acumulado",
-    f"R$ {lucro_total:+.2f}",
-    delta=f"{lucro_total:+.2f} R$",
+    "🔄 Banca Atual Corrente",
+    f"R$ {banca_atual:.2f}",
+    delta=f"{lucro_total:+.2f} R$" if operacoes_totais > 0 else None,
     delta_color="normal" if lucro_total >= 0 else "inverse",
-    help="Resultado líquido total de todas as entradas salvas."
+    help="O saldo atualizado da sua banca (Banca Inicial + Lucros Acumulados)."
 )
 kpi_cols[2].metric(
     "✅ Greens / ❌ Reds",
@@ -397,18 +403,18 @@ kpi_cols[2].metric(
 kpi_cols[3].metric(
     "🎯 Winrate",
     f"{winrate:.1f}%",
-    help="Percentual de vitórias com base no histórico gravado."
+    help="Percentual de vitórias com base no histórico."
 )
 kpi_cols[4].metric(
     "📊 ROI do Histórico",
     f"{roi:+.1f}%",
-    help="Retorno sobre o capital total investido (Stake Total)."
+    help="Retorno sobre o capital total investido (Stake Total acumulada)."
 )
 
 st.write("")
 
 # =========================================
-# SISTEMA DE ABAS (Layout Premium)
+# ABAS DO DASHBOARD
 # =========================================
 tab_feed, tab_calculator, tab_insights = st.tabs([
     "⚽ Monitor de Oportunidades EV+",
@@ -426,24 +432,21 @@ with tab_feed:
         graph_cols = st.columns([7, 3])
         
         with graph_cols[0]:
-            st.subheader("📈 Curva de Crescimento (Lucro Acumulado)")
-            # Calculando o lucro acumulado passo a passo
+            st.subheader("📈 Curva de Crescimento (Banca ao Longo do Tempo)")
             historico_acumulado = historico.copy()
-            historico_acumulado["lucro_acumulado"] = historico_acumulado["lucro"].cumsum()
+            historico_acumulado["banca_acumulada"] = banca_inicial + historico_acumulado["lucro"].cumsum()
             
-            # Inserindo ponto de partida zero para o gráfico ficar bonito
             ponto_inicial = pd.DataFrame([{
                 "id": 0, "data": "Início", "jogo": "Capital Inicial", "liga": "START",
                 "odd": 0.0, "stake": 0.0, "responsabilidade": 0.0,
-                "resultado": "START", "lucro": 0.0, "lucro_acumulado": 0.0
+                "resultado": "START", "lucro": 0.0, "banca_acumulada": banca_inicial
             }])
             df_plot = pd.concat([ponto_inicial, historico_acumulado], ignore_index=True)
             
-            # Gráfico Streamlit Line Chart elegante
             st.line_chart(
                 data=df_plot,
                 x="id",
-                y="lucro_acumulado",
+                y="banca_acumulada",
                 color="#00C9FF",
                 use_container_width=True
             )
@@ -496,34 +499,50 @@ with tab_feed:
 
         st.write("---")
 
-    # Filtros e Buscas
-    st.subheader("⚽ Jogos EV+ Encontrados")
-    filter_cols = st.columns([4, 3, 3, 2])
-    with filter_cols[0]:
-        search_query = st.text_input("🔍 Buscar por Time ou Liga", "", help="Filtre os jogos por nome de time ou campeonato.", key="search_feed")
-    with filter_cols[1]:
-        min_odd_filter = st.slider("Filtro Odd Mínima do Empate", 2.0, 8.0, 2.5, step=0.1, key="min_odd_feed")
-    with filter_cols[2]:
-        min_ev_filter = st.slider("Filtro EV Mínimo (R$)", 0.0, 100.0, 0.0, step=1.0, key="min_ev_feed")
-    with filter_cols[3]:
-        sort_by = st.selectbox(
-            "Ordenar por",
-            ["Maior EV+", "Maior Edge", "Mais Cedo", "Menor Odd Empate"],
-            key="sort_feed"
-        )
+    # Verificação de Chaves de API
+    chaves_configuradas = (st.session_state.api_football != "SUA_API_FOOTBALL") and (st.session_state.api_odds != "SUA_API_ODDS")
 
-    # Captura de dados de acordo com a sidebar
-    dados = None
-    odds_data = None
-    
-    try:
-        if st.session_state.api_mode == "Simulador (Demo)":
-            dados, odds_data = mock_data.generate_mock_data()
-        else:
+    if not chaves_configuradas:
+        st.info("👋 **Bem-vindo ao Trader LD PRO!** Para começar a operar de forma real, configure suas chaves de API na barra lateral esquerda.")
+        st.markdown("""
+        ### 🔌 Como obter suas chaves de API gratuitas:
+        
+        1. **Chave de Jogos (Football-Data):**
+           * Cadastre-se em [football-data.org](https://www.football-data.org) (plano gratuito).
+           * Eles enviarão um token por e-mail (Token de API).
+           * Cole esse token no campo **Football-Data Token** na barra lateral.
+        
+        2. **Chave de Odds (The Odds API):**
+           * Cadastre-se gratuitamente em [the-odds-api.com](https://the-odds-api.com) para obter acesso a odds de futebol de diversas casas de apostas.
+           * Cole sua chave no campo **The Odds API Key** na barra lateral.
+        
+        3. Clique em **💾 Salvar Configurações**. O feed de jogos reais aparecerá aqui instantaneamente!
+        """)
+    else:
+        st.subheader("⚽ Monitor de Oportunidades em Tempo Real")
+        
+        # Filtros de Busca e Exibição
+        filter_cols = st.columns([4, 3, 3, 2])
+        with filter_cols[0]:
+            search_query = st.text_input("🔍 Buscar por Time ou Liga", "", help="Filtre os jogos por nome de time ou campeonato.", key="search_feed")
+        with filter_cols[1]:
+            min_odd_filter = st.slider("Filtro Odd Mínima do Empate", 2.0, 8.0, 2.5, step=0.1, key="min_odd_feed")
+        with filter_cols[2]:
+            min_ev_filter = st.slider("Filtro EV Mínimo (R$)", 0.0, 100.0, 0.0, step=1.0, key="min_ev_feed")
+        with filter_cols[3]:
+            sort_by = st.selectbox(
+                "Ordenar por",
+                ["Maior EV+", "Maior Edge", "Mais Cedo", "Menor Odd Empate"],
+                key="sort_feed"
+            )
+
+        try:
+            # Chamadas Reais de API
             headers = {"X-Auth-Token": st.session_state.api_football}
             session = requests.Session()
             session.trust_env = False
             
+            # 1. Requisição das Partidas Real
             response = session.get(
                 "https://api.football-data.org/v4/matches?status=SCHEDULED",
                 headers=headers,
@@ -533,6 +552,7 @@ with tab_feed:
                 raise Exception(f"Erro na API Football-Data ({response.status_code}): {response.text}")
             dados = response.json()
             
+            # 2. Requisição das Odds Real
             odds_url = (
                 "https://api.the-odds-api.com/v4/sports/soccer/odds/"
                 f"?apiKey={st.session_state.api_odds}"
@@ -545,143 +565,159 @@ with tab_feed:
                 raise Exception(f"Erro na The Odds API ({odds_response.status_code}): {odds_response.text}")
             odds_data = odds_response.json()
 
-        # Mapeamento das Odds
-        odds_dict = {}
-        for jogo in odds_data:
-            try:
-                home = jogo["home_team"]
-                away = jogo["away_team"]
-                nome = f"{home} x {away}"
-                odd_draw = None
-                
-                for bookmaker in jogo["bookmakers"]:
-                    for market in bookmaker["markets"]:
-                        for outcome in market["outcomes"]:
-                            if outcome["name"] == "Draw":
-                                odd_draw = outcome["price"]
-                
-                if odd_draw:
-                    odds_dict[nome] = odd_draw
-            except:
-                pass
-
-        # Filtragem e processamento
-        oportunidades = []
-        for partida in dados.get("matches", []):
-            casa = partida["homeTeam"]["name"]
-            fora = partida["awayTeam"]["name"]
-            liga = partida["competition"]["name"]
-            horario_utc = partida["utcDate"]
-            
-            try:
-                dt = datetime.strptime(horario_utc, "%Y-%m-%dT%H:%M:%SZ")
-                horario = dt.strftime("%H:%M")
-            except:
-                horario = horario_utc[11:16]
-                
-            jogo = f"{casa} x {fora}"
-            odd = None
-            
-            for nome_odds, odd_valor in odds_dict.items():
-                nome_lower = nome_odds.lower()
-                if casa.lower() in nome_lower and fora.lower() in nome_lower:
-                    odd = odd_valor
-                    break
+            # Mapeamento das Odds
+            odds_dict = {}
+            for jogo in odds_data:
+                try:
+                    home = jogo["home_team"]
+                    away = jogo["away_team"]
+                    nome = f"{home} x {away}"
+                    odd_draw = None
                     
-            if not odd:
-                continue
+                    for bookmaker in jogo["bookmakers"]:
+                        for market in bookmaker["markets"]:
+                            for outcome in market["outcomes"]:
+                                if outcome["name"] == "Draw":
+                                    odd_draw = outcome["price"]
+                    
+                    if odd_draw:
+                        odds_dict[nome] = odd_draw
+                except:
+                    pass
+
+            # Processamento
+            oportunidades = []
+            for partida in dados.get("matches", []):
+                casa = partida["homeTeam"]["name"]
+                fora = partida["awayTeam"]["name"]
+                liga = partida["competition"]["name"]
+                horario_utc = partida["utcDate"]
                 
-            p_mercado = prob_mercado(odd)
-            p_modelo = modelo_empate(media_gols)
-            edge = round(p_mercado - p_modelo, 2)
-            
-            stake_real = stake_ajustada(stake_base, odd)
-            responsabilidade = round(stake_real * (odd - 1), 2)
-            ev = calcular_ev(stake_real, odd, p_modelo)
-            
-            if ev <= 0:
-                continue
-            if odd < min_odd_filter:
-                continue
-            if ev < min_ev_filter:
-                continue
+                try:
+                    dt = datetime.strptime(horario_utc, "%Y-%m-%dT%H:%M:%SZ")
+                    horario = dt.strftime("%H:%M")
+                except:
+                    horario = horario_utc[11:16]
+                    
+                jogo = f"{casa} x {fora}"
+                odd = None
                 
-            if search_query:
-                q = search_query.lower()
-                if q not in casa.lower() and q not in fora.lower() and q not in liga.lower():
+                for nome_odds, odd_valor in odds_dict.items():
+                    nome_lower = nome_odds.lower()
+                    if casa.lower() in nome_lower and fora.lower() in nome_lower:
+                        odd = odd_valor
+                        break
+                        
+                if not odd:
                     continue
                     
-            oportunidades.append({
-                "id": partida["id"],
-                "partida": partida,
-                "jogo": jogo,
-                "liga": liga,
-                "horario": horario,
-                "odd": odd,
-                "p_mercado": p_mercado,
-                "p_modelo": p_modelo,
-                "edge": edge,
-                "stake_real": stake_real,
-                "responsabilidade": responsabilidade,
-                "ev": ev
-            })
-
-        if sort_by == "Maior EV+":
-            oportunidades = sorted(oportunidades, key=lambda x: x["ev"], reverse=True)
-        elif sort_by == "Maior Edge":
-            oportunidades = sorted(oportunidades, key=lambda x: x["edge"], reverse=True)
-        elif sort_by == "Mais Cedo":
-            oportunidades = sorted(oportunidades, key=lambda x: x["horario"])
-        elif sort_by == "Menor Odd Empate":
-            oportunidades = sorted(oportunidades, key=lambda x: x["odd"])
-
-        # Display dos Jogos
-        if len(oportunidades) == 0:
-            st.info("Nenhum jogo EV+ com odds de valor detectado com base nos seus parâmetros atuais.")
-        else:
-            st.write(f"Exibindo **{len(oportunidades)}** oportunidades de Lay Empate:")
-            for op in oportunidades:
-                m_id = op["id"]
+                # Cálculos com base nas Odds encontradas
+                p_mercado = prob_mercado(odd)
+                p_modelo = modelo_empate(media_gols)
+                edge = round(p_mercado - p_modelo, 2)
                 
-                with st.container(border=True):
-                    col_det, col_odds, col_risco = st.columns([3.5, 2, 2.5])
+                # CÁLCULO DA STAKE BASE DINÂMICA
+                if tipo_gestao == "Stake Fixa":
+                    # Stake base = % fixo da banca de cálculo
+                    stake_inicial_recomendada = banca_calculo * (stake_percentual / 100)
+                    stake_real = stake_ajustada(stake_inicial_recomendada, odd)
+                    responsabilidade = round(stake_real * (odd - 1), 2)
+                else:
+                    # Risco Fixo: Responsabilidade (risco máximo) é fixa em % da banca de cálculo
+                    responsabilidade_limite = banca_calculo * (stake_percentual / 100)
+                    # Stake = responsabilidade / (odd - 1)
+                    stake_inicial_recomendada = responsabilidade_limite / (odd - 1) if odd > 1 else 0.0
+                    stake_real = stake_ajustada(stake_inicial_recomendada, odd)
+                    responsabilidade = round(stake_real * (odd - 1), 2)
+                
+                ev = calcular_ev(stake_real, odd, p_modelo)
+                
+                # Filtros
+                if ev <= 0:
+                    continue
+                if odd < min_odd_filter:
+                    continue
+                if ev < min_ev_filter:
+                    continue
                     
-                    with col_det:
-                        st.markdown(f"### ⚽ {op['jogo']}")
-                        st.markdown(f"🏆 `{op['liga']}` • 🕒 Horário: **{op['horario']}**")
+                if search_query:
+                    q = search_query.lower()
+                    if q not in casa.lower() and q not in fora.lower() and q not in liga.lower():
+                        continue
                         
-                        st.markdown("""
-                        <div style="background-color: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; border-left: 3px solid #00C9FF;">
-                            🎯 <strong>Entrada:</strong> Próximo aos 10min de jogo (se empatado)<br>
-                            🚪 <strong>Saída (Cashout):</strong> Imediatamente após o primeiro gol
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.write("")
-                        
-                    with col_odds:
-                        st.metric("Odd Empate (Lay)", f"{op['odd']:.2f}")
-                        st.metric("Edge Modelo vs Mercado", f"{op['edge']:+.2f}%")
-                        
-                    with col_risco:
-                        st.metric("Stake Recomendada", f"R$ {op['stake_real']:.2f}")
-                        st.metric("Responsabilidade Máxima", f"R$ {op['responsabilidade']:.2f}")
+                oportunidades.append({
+                    "id": partida["id"],
+                    "partida": partida,
+                    "jogo": jogo,
+                    "liga": liga,
+                    "horario": horario,
+                    "odd": odd,
+                    "p_mercado": p_mercado,
+                    "p_modelo": p_modelo,
+                    "edge": edge,
+                    "stake_real": stake_real,
+                    "responsabilidade": responsabilidade,
+                    "ev": ev
+                })
 
-                    # Linha de Ações (Link, Telegram, Green, Red)
-                    action_cols = st.columns([2.5, 2.5, 2, 2])
+            # Ordenação
+            if sort_by == "Maior EV+":
+                oportunidades = sorted(oportunidades, key=lambda x: x["ev"], reverse=True)
+            elif sort_by == "Maior Edge":
+                oportunidades = sorted(oportunidades, key=lambda x: x["edge"], reverse=True)
+            elif sort_by == "Mais Cedo":
+                oportunidades = sorted(oportunidades, key=lambda x: x["horario"])
+            elif sort_by == "Menor Odd Empate":
+                oportunidades = sorted(oportunidades, key=lambda x: x["odd"])
+
+            # Exibição
+            if len(oportunidades) == 0:
+                st.info("Nenhum confronto EV+ atende aos filtros configurados neste momento.")
+            else:
+                st.write(f"Encontrados **{len(oportunidades)}** confrontos reais EV+ para Lay ao Empate:")
+                
+                for op in oportunidades:
+                    m_id = op["id"]
                     
-                    with action_cols[0]:
-                        st.link_button(
-                            "🔥 Abrir Exchange Fulltbet",
-                            "https://fulltbet.bet",
-                            use_container_width=True
-                        )
+                    with st.container(border=True):
+                        col_det, col_odds, col_risco = st.columns([3.5, 2, 2.5])
                         
-                    with action_cols[1]:
-                        if st.button("🚀 Alertar Telegram", key=f"tg_btn_{m_id}", use_container_width=True):
-                            if not st.session_state.telegram_token or not st.session_state.telegram_chat_id:
-                                st.error("Configure suas credenciais do Telegram na barra lateral esquerda primeiro!")
-                            else:
-                                msg_sinal = f"""
+                        with col_det:
+                            st.markdown(f"### ⚽ {op['jogo']}")
+                            st.markdown(f"🏆 `{op['liga']}` • 🕒 Horário: **{op['horario']}**")
+                            
+                            st.markdown("""
+                            <div style="background-color: rgba(255,255,255,0.02); padding: 8px 12px; border-radius: 8px; font-size: 0.85rem; border-left: 3px solid #00C9FF;">
+                                🎯 <strong>Entrada:</strong> Próximo aos 10min de jogo (se empatado)<br>
+                                🚪 <strong>Saída (Cashout):</strong> Imediatamente após o primeiro gol
+                            </div>
+                            """, unsafe_allow_html=True)
+                            st.write("")
+                            
+                        with col_odds:
+                            st.metric("Odd Empate (Lay)", f"{op['odd']:.2f}")
+                            st.metric("Edge Modelo vs Mercado", f"{op['edge']:+.2f}%")
+                            
+                        with col_risco:
+                            st.metric("Stake Recomendada", f"R$ {op['stake_real']:.2f}", help="Stake ajustada de acordo com seu método de gestão de risco selecionado.")
+                            st.metric("Responsabilidade Máxima", f"R$ {op['responsabilidade']:.2f}", help="Risco máximo em caso de Red sem cashout.")
+
+                        # Ações
+                        action_cols = st.columns([2.5, 2.5, 2, 2])
+                        
+                        with action_cols[0]:
+                            st.link_button(
+                                "🔥 Abrir Exchange Fulltbet",
+                                "https://fulltbet.bet",
+                                use_container_width=True
+                            )
+                            
+                        with action_cols[1]:
+                            if st.button("🚀 Alertar Telegram", key=f"tg_btn_{m_id}", use_container_width=True):
+                                if not st.session_state.telegram_token or not st.session_state.telegram_chat_id:
+                                    st.error("Configure suas credenciais do Telegram na barra lateral esquerda!")
+                                else:
+                                    msg_sinal = f"""
 🚨 *NOVA OPORTUNIDADE: LAY DRAW EV+* 🚨
 
 ⚽ *Jogo:* {op['jogo']}
@@ -705,98 +741,162 @@ with tab_feed:
 
 🔥 _Sinal enviado automaticamente via Trader LD PRO_
 """
-                                sucesso, msg_status = enviar_alerta_telegram(
-                                    st.session_state.telegram_token,
-                                    st.session_state.telegram_chat_id,
-                                    msg_sinal
+                                    sucesso, msg_status = enviar_alerta_telegram(
+                                        st.session_state.telegram_token,
+                                        st.session_state.telegram_chat_id,
+                                        msg_sinal
+                                    )
+                                    if sucesso:
+                                        st.success("Sinal enviado ao Telegram!")
+                                    else:
+                                        st.error(f"Erro no envio: {msg_status}")
+
+                        # Botões que abrem os formulários de gravação reais
+                        with action_cols[2]:
+                            if st.button(f"✅ REGISTRAR GREEN", key=f"btn_green_{m_id}", use_container_width=True):
+                                st.session_state.active_green_id = m_id
+                                st.session_state.active_red_id = None
+                                st.rerun()
+
+                        with action_cols[3]:
+                            if st.button(f"❌ REGISTRAR RED", key=f"btn_red_{m_id}", use_container_width=True):
+                                st.session_state.active_red_id = m_id
+                                st.session_state.active_green_id = None
+                                st.rerun()
+
+                        # 🟢 FORMULÁRIO DE CONFIRMAÇÃO DE GREEN REAL
+                        if st.session_state.active_green_id == m_id:
+                            st.write("")
+                            with st.form(key=f"form_green_{m_id}"):
+                                st.markdown("### ✏️ Confirmar Lucro Real do Green")
+                                st.markdown("Insira o lucro bruto real que você obteve no mercado. A taxa de comissão da exchange será deduzida automaticamente.")
+                                
+                                # Sugerimos a stake_real como lucro bruto padrão
+                                lucro_bruto_real = st.number_input(
+                                    "Lucro Bruto Obtido (R$)",
+                                    min_value=0.0,
+                                    value=float(op["stake_real"]),
+                                    step=1.0,
+                                    key=f"val_green_{m_id}"
                                 )
-                                if sucesso:
-                                    st.success("Sinal enviado ao Telegram com sucesso!")
-                                else:
-                                    st.error(f"Erro no disparo do alerta: {msg_status}")
+                                
+                                comissao_deduzida = lucro_bruto_real * (comissao / 100)
+                                lucro_liquido_real = lucro_bruto_real - comissao_deduzida
+                                
+                                st.markdown(f"🔹 **Taxa da Exchange ({comissao}%):** `R$ {comissao_deduzida:.2f}`")
+                                st.markdown(f"🟩 **Lucro Líquido Real Gravado:** **R$ {lucro_liquido_real:.2f}**")
+                                
+                                form_cols = st.columns([1, 1])
+                                with form_cols[0]:
+                                    if st.form_submit_button("Salvar no Histórico Operacional", use_container_width=True):
+                                        with sqlite3.connect(DB_NAME) as conn:
+                                            cursor = conn.cursor()
+                                            cursor.execute("""
+                                            INSERT INTO operacoes (data, jogo, liga, odd, stake, responsabilidade, resultado, lucro)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                            """, (
+                                                str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                                                op["jogo"],
+                                                op["liga"],
+                                                op["odd"],
+                                                op["stake_real"],
+                                                op["responsabilidade"],
+                                                "GREEN",
+                                                lucro_liquido_real
+                                            ))
+                                            conn.commit()
+                                        st.session_state.active_green_id = None
+                                        st.success("Green registrado!")
+                                        st.rerun()
+                                        
+                                with form_cols[1]:
+                                    if st.form_submit_button("Cancelar", use_container_width=True):
+                                        st.session_state.active_green_id = None
+                                        st.rerun()
 
-                    with action_cols[2]:
-                        if st.button(f"✅ GREEN", key=f"green_{m_id}", use_container_width=True):
-                            lucro = op["stake_real"]
-                            with sqlite3.connect(DB_NAME) as conn:
-                                cursor = conn.cursor()
-                                cursor.execute("""
-                                INSERT INTO operacoes (data, jogo, liga, odd, stake, responsabilidade, resultado, lucro)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                                    op["jogo"],
-                                    op["liga"],
-                                    op["odd"],
-                                    op["stake_real"],
-                                    op["responsabilidade"],
-                                    "GREEN",
-                                    lucro
-                                ))
-                                conn.commit()
-                            st.success(f"Green registrado com sucesso!")
-                            st.rerun()
+                        # 🔴 FORMULÁRIO DE CONFIRMAÇÃO DE RED REAL
+                        if st.session_state.active_red_id == m_id:
+                            st.write("")
+                            with st.form(key=f"form_red_{m_id}"):
+                                st.markdown("### ✏️ Confirmar Prejuízo Real do Red")
+                                st.markdown("Insira o prejuízo real final sofrido nesta operação (geralmente menor do que a responsabilidade inteira devido a cashout tardio).")
+                                
+                                # Sugerimos a responsabilidade máxima como prejuízo bruto padrão
+                                prejuizo_real_usuario = st.number_input(
+                                    "Prejuízo Sofrido (R$)",
+                                    min_value=0.0,
+                                    value=float(op["responsabilidade"]),
+                                    step=1.0,
+                                    key=f"val_red_{m_id}"
+                                )
+                                
+                                st.markdown(f"🟥 **Prejuízo Líquido Real Gravado:** **R$ -{prejuizo_real_usuario:.2f}**")
+                                
+                                form_cols = st.columns([1, 1])
+                                with form_cols[0]:
+                                    if st.form_submit_button("Salvar no Histórico Operacional", use_container_width=True):
+                                        with sqlite3.connect(DB_NAME) as conn:
+                                            cursor = conn.cursor()
+                                            cursor.execute("""
+                                            INSERT INTO operacoes (data, jogo, liga, odd, stake, responsabilidade, resultado, lucro)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                            """, (
+                                                str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                                                op["jogo"],
+                                                op["liga"],
+                                                op["odd"],
+                                                op["stake_real"],
+                                                op["responsabilidade"],
+                                                "RED",
+                                                -prejuizo_real_usuario
+                                            ))
+                                            conn.commit()
+                                        st.session_state.active_red_id = None
+                                        st.success("Red registrado!")
+                                        st.rerun()
+                                        
+                                with form_cols[1]:
+                                    if st.form_submit_button("Cancelar", use_container_width=True):
+                                        st.session_state.active_red_id = None
+                                        st.rerun()
 
-                    with action_cols[3]:
-                        if st.button(f"❌ RED", key=f"red_{m_id}", use_container_width=True):
-                            prejuizo = -op["responsabilidade"]
-                            with sqlite3.connect(DB_NAME) as conn:
-                                cursor = conn.cursor()
-                                cursor.execute("""
-                                INSERT INTO operacoes (data, jogo, liga, odd, stake, responsabilidade, resultado, lucro)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (
-                                    str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                                    op["jogo"],
-                                    op["liga"],
-                                    op["odd"],
-                                    op["stake_real"],
-                                    op["responsabilidade"],
-                                    "RED",
-                                    prejuizo
-                                ))
-                                conn.commit()
-                            st.error(f"Red registrado com prejuízo.")
-                            st.rerun()
+            # Operações recentes exibidas na base
+            st.write("---")
+            st.subheader("📋 Histórico de Operações Recentes")
+            if len(historico) > 0:
+                df_formatado = historico.copy()
+                df_formatado = df_formatado.sort_values(by="id", ascending=False)
+                df_formatado["resultado"] = df_formatado["resultado"].apply(lambda r: "✅ GREEN" if r == "GREEN" else ("❌ RED" if r == "RED" else r))
+                df_formatado["stake"] = df_formatado["stake"].map("R$ {:.2f}".format)
+                df_formatado["responsabilidade"] = df_formatado["responsabilidade"].map("R$ {:.2f}".format)
+                df_formatado["lucro"] = df_formatado["lucro"].map("R$ {:+.2f}".format)
+                df_formatado["odd"] = df_formatado["odd"].map("{:.2f}".format)
+                
+                st.dataframe(
+                    df_formatado,
+                    use_container_width=True,
+                    column_config={
+                        "id": "ID",
+                        "data": "Data/Hora",
+                        "jogo": "Partida",
+                        "liga": "Campeonato",
+                        "odd": "Odd do Empate",
+                        "stake": "Stake Real",
+                        "responsabilidade": "Responsabilidade",
+                        "resultado": "Resultado",
+                        "lucro": "Lucro Líquido Real"
+                    },
+                    hide_index=True
+                )
+            else:
+                st.info("Nenhuma entrada registrada na tabela de histórico ainda.")
 
-        # Operações recentes exibidas na base do Monitor
-        st.write("---")
-        st.subheader("📋 Histórico de Operações Recentes")
-        if len(historico) > 0:
-            df_formatado = historico.copy()
-            df_formatado = df_formatado.sort_values(by="id", ascending=False)
-            df_formatado["resultado"] = df_formatado["resultado"].apply(lambda r: "✅ GREEN" if r == "GREEN" else ("❌ RED" if r == "RED" else r))
-            df_formatado["stake"] = df_formatado["stake"].map("R$ {:.2f}".format)
-            df_formatado["responsabilidade"] = df_formatado["responsabilidade"].map("R$ {:.2f}".format)
-            df_formatado["lucro"] = df_formatado["lucro"].map("R$ {:+.2f}".format)
-            df_formatado["odd"] = df_formatado["odd"].map("{:.2f}".format)
-            
-            st.dataframe(
-                df_formatado,
-                use_container_width=True,
-                column_config={
-                    "id": "ID",
-                    "data": "Data/Hora",
-                    "jogo": "Partida",
-                    "liga": "Campeonato",
-                    "odd": "Odd do Empate",
-                    "stake": "Stake Real",
-                    "responsabilidade": "Responsabilidade",
-                    "resultado": "Resultado",
-                    "lucro": "Lucro Líquido"
-                },
-                hide_index=True
-            )
-        else:
-            st.info("Nenhuma entrada operacional registrada ainda.")
-
-    except Exception as e:
-        st.error("🚨 Erro crítico de inicialização ou no processamento de APIs.")
-        st.markdown(f"**Detalhes do erro:** `{str(e)}`")
-        st.markdown("""
-        💡 **Dica:** Certifique-se de que selecionou o modo **Simulador (Demo)** na barra lateral caso não tenha chaves válidas configuradas nas APIs. 
-        Se você ativou a **API Real**, confira se suas chaves e plano de chamadas de API estão ativos e corretos.
-        """)
+        except Exception as e:
+            st.error("🚨 Erro crítico de inicialização ou no processamento de APIs.")
+            st.markdown(f"**Detalhes do erro:** `{str(e)}`")
+            st.markdown("""
+            💡 **Dica:** Confirme se suas chaves e plano de chamadas de API do **The Odds API** e **Football-Data** estão corretos e salvos na barra lateral esquerda.
+            """)
 
 # =========================================
 # ABA 2: CALCULADORA DE CASHOUT
@@ -811,7 +911,7 @@ with tab_calculator:
     col_inputs, col_results = st.columns([1, 1])
     
     with col_inputs:
-        st.markdown("#### 📥 Entrada Original (Lay)")
+        st.markdown("#### 📥 Aposta Original (Lay)")
         odd_lay_calc = st.number_input("Odd do Lay Inicial", min_value=1.01, max_value=20.0, value=3.40, step=0.05, format="%.2f", key="odd_lay_calc")
         stake_lay_calc = st.number_input("Stake do Lay Inicial (R$)", min_value=1.0, max_value=100000.0, value=50.0, step=5.0, key="stake_lay_calc")
         
@@ -904,7 +1004,6 @@ with tab_insights:
         with col_ins_left:
             st.markdown("### 🏆 Ligas Mais Lucrativas (Ganhos por Campeonato)")
             if "liga" in historico.columns and historico["liga"].notna().any():
-                # Filtrar nulos da liga e agrupar
                 historico_filtrado_liga = historico[historico["liga"].notna()]
                 perf_liga = historico_filtrado_liga.groupby("liga")["lucro"].sum().reset_index()
                 perf_liga = perf_liga.sort_values(by="lucro", ascending=False)
@@ -983,20 +1082,19 @@ with tab_insights:
             
         best_league = None
         if "liga" in historico.columns and historico["liga"].notna().any():
-            # recalculando o dataframe se houver ligas
             perf_liga_sort = perf_liga.sort_values(by="lucro", ascending=False)
             if len(perf_liga_sort) > 0:
                 best_league = perf_liga_sort.iloc[0]
 
         insight_text = "### 🧠 Recomendações Operacionais baseadas no seu Histórico:\n"
         if melhor_faixa is not None and melhor_faixa["ROI %"] > 0:
-            insight_text += f"* 🟢 **Faixa Altamente Vantajosa:** Sua performance é estatisticamente superior nas **{melhor_faixa['faixa_odd'][3:]}**, operando com um **ROI excelente de {melhor_faixa['ROI %']:.1f}%** e winrate de **{melhor_faixa['Winrate %']:.1f}%**. Recomendamos focar nestas oportunidades!\n"
+            insight_text += f"* 🟢 **Faixa Altamente Vantajosa:** Sua performance é estatisticamente superior nas **{melhor_faixa['faixa_odd'][3:]}**, operando com um **ROI excelente de {melhor_faixa['ROI %']:.1f}%** e winrate de **{melhor_faixa['Winrate %']:.1f}%**. Recomendamos priorizar entradas nessa faixa!\n"
         if pior_faixa is not None and pior_faixa["ROI %"] < 0:
-            insight_text += f"* 🔴 **Ajuste Recomendado:** As **{pior_faixa['faixa_odd'][3:]}** apresentam **ROI negativo de {pior_faixa['ROI %']:.1f}%**. Sugerimos reavaliar o tamanho da stake para esse grupo ou aplicar filtros mais restritivos!\n"
+            insight_text += f"* 🔴 **Ajuste Recomendado:** As **{pior_faixa['faixa_odd'][3:]}** apresentam **ROI de {pior_faixa['ROI %']:.1f}%**. Sugerimos limitar sua stake nessas odds altas para reduzir drawdowns!\n"
         if best_league is not None and best_league["lucro"] > 0:
-            insight_text += f"* 🏆 **Liga Ouro:** A liga **{best_league['liga']}** representa o seu mercado mais lucrativo, acumulando um saldo líquido de **R$ {best_league['lucro']:.2f}**.\n"
+            insight_text += f"* 🏆 **Liga Ouro:** A liga **{best_league['liga']}** representa o seu mercado mais lucrativo, acumulando um saldo líquido real de **R$ {best_league['lucro']:.2f}**.\n"
         else:
-            insight_text += "* 📈 **Mapeamento:** Registre novas entradas em campeonatos variados. O algoritmo de performance mapeará automaticamente em qual liga você detém a maior taxa de Green!\n"
+            insight_text += "* 📈 **Mapeamento:** Registre novas entradas de greens e reds. O algoritmo inteligente mapeará automaticamente o seu ROI real em cada campeonato!\n"
             
         st.markdown(f"""
         <div style="background-color: rgba(30, 41, 59, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 20px;">
