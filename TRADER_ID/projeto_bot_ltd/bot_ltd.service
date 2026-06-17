@@ -1,0 +1,15 @@
+[Unit]
+Description=LTD Super Favorites Bot
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/root/bot_ltd
+ExecStart=/usr/bin/python3 prod_wc_bot.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/root/bot_ltd/bot_trading.log
+StandardError=append:/root/bot_ltd/bot_trading.log
+
+[Install]
+WantedBy=multi-user.target
